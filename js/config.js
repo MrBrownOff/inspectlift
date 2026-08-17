@@ -1,7 +1,5 @@
 // ============================================================
 // config.js — Configuration Supabase
-// Remplacez VOTRE_ID et VOTRE_CLÉ_ANON par vos vraies valeurs
-// Supabase → Settings → API
 // ============================================================
 
 const SUPABASE_URL = 'https://ydbkxmmkfskxruhdxypx.supabase.co'
