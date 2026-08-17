@@ -12,4 +12,4 @@ const EDGE_FUNCTION_URL = `${SUPABASE_URL}/functions/v1/send-inspection`
 const APP_URL = 'https://mrbrownoff.github.io/inspectlift'
 
 // Email destinataire
-const DEFAULT_TO_EMAIL = 'brun.cedric@gmail.com'
+const DEFAULT_TO_EMAIL = 'novatests2026@gmail.com'
