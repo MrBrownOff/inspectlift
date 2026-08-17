@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Fiche d'inspection – Chariot élévateur</title>
+
+  <!-- Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <!-- jsPDF -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <!-- Config -->
+  <script src="js/config.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #d6d6d6;
+      color: #111;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .wrap { max-width: 640px; margin: 0 auto; background: white; min-height: 100vh; }
+
+    /* ── Loading screen ── */
+    #loadingScreen {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; min-height: 100vh; gap: 1rem;
+    }
+    .spinner {
+      width: 40px; height: 40px; border: 3px solid #e0e0e0;
+      border-top-color: #4f8c0d; border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Error screen ── */
+    #errorScreen {
+      display: none; flex-direction: column; align-items: center;
+      justify-content: center; min-height: 100vh; padding: 2rem; gap: 1rem; text-align: center;
+    }
+    .err-icon { font-size: 48px; }
+    .err-title { font-size: 20px; font-weight: 700; color: #dc2626; }
+    .err-msg   { font-size: 14px; color: #888; line-height: 1.5; }
+
+    /* ── Header ── */
+    .app-header {
+      background: #111; color: white; padding: 14px 16px 12px;
+      position: sticky; top: 0; z-index: 100;
+    }
+    .header-top { display: flex; align-items: flex-start; justify-content: space-between; }
+    .app-header h1 { font-size: 14px; font-weight: 700; letter-spacing: .3px; }
+    .app-header .sub { font-size: 11px; color: #888; margin-top: 2px; }
+    .vehicle-badge {
+      background: #f5c518; color: #111; font-size: 12px; font-weight: 800;
+      padding: 3px 10px; border-radius: 3px; letter-spacing: .5px;
+      white-space: nowrap; margin-left: 12px; flex-shrink: 0;
+    }
+    .progress-bar { height: 3px; background: #2a2a2a; margin-top: 10px; border-radius: 2px; overflow: hidden; }
+    .progress-fill { height: 100%; background: #22c55e; width: 0%; transition: width .35s; border-radius: 2px; }
+    .progress-label { font-size: 10px; color: #777; margin-top: 4px; text-align: right; }
+
+    /* ── Info section ── */
+    .info-section { padding: 14px; border-bottom: 2.5px solid #111; }
+    .legende-bar {
+      display: flex; align-items: center; gap: 6px; background: #f7f7f7;
+      border: 1px solid #e0e0e0; padding: 8px 12px; border-radius: 5px;
+      margin-bottom: 14px; font-size: 12px; flex-wrap: wrap;
+    }
+    .leg-title { font-size: 10px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: .5px; margin-right: 4px; }
+    .leg-ok  { color: #16a34a; font-weight: 800; font-size: 16px; }
+    .leg-x   { color: #dc2626; font-weight: 800; font-size: 15px; }
+    .leg-na  { color: #6b7280; font-weight: 700; font-size: 11px; }
+    .leg-sep { color: #ccc; }
+    .leg-txt { font-size: 12px; color: #444; margin-right: 8px; }
+
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-bottom: 9px; }
+    .field-row.solo { grid-template-columns: 1fr; }
+    .field { display: flex; flex-direction: column; gap: 3px; }
+    .field > label { font-size: 10px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: .6px; }
+    .field input {
+      border: 1.5px solid #ddd; border-radius: 5px; padding: 9px 10px;
+      font-size: 14px; font-family: inherit; color: #111; background: white;
+      width: 100%; -webkit-appearance: none; transition: border-color .15s;
+    }
+    .field input:focus { outline: none; border-color: #111; }
+    .field input[readonly] { background: #f2f2f2; color: #444; font-weight: 600; }
+    .field input.error { border-color: #dc2626; }
+
+    /* ── Section headers ── */
+    .section-header {
+      background: #4f8c0d; color: black; padding: 10px 16px;
+      font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+    }
+
+    /* ── Inspection rows ── */
+    .item-row {
+      display: flex; align-items: center; min-height: 50px;
+      border-bottom: 1px solid #ebebeb; background: white;
+      padding: 8px 12px; gap: 8px;
+    }
+    .item-row.row-odd  { background: white; }
+    .item-row.row-even { background: #ececec; }
+    .item-row.sub-row  { padding-left: 36px; }
+    .item-row.parent-row { background: #f0f0f0; min-height: 34px; padding: 6px 12px; border-bottom: 1px solid #e0e0e0; }
+    .item-row.has-anomalie { background: #fff8f8 !important; }
+    .item-row.unanswered  { background: #fff5f5 !important; }
+
+    .item-num   { width: 20px; flex-shrink: 0; font-size: 11px; font-weight: 700; color: #bbb; text-align: right; }
+    .item-label { flex: 1; font-size: 13px; line-height: 1.35; color: #111; }
+    .parent-label { flex: 1; font-size: 13px; font-weight: 600; color: #111; }
+
+    /* ── Toggles ── */
+    .toggles { display: flex; gap: 4px; flex-shrink: 0; }
+    .toggle {
+      width: 38px; height: 38px; border: 1.5px solid #e0e0e0; background: #fafafa;
+      border-radius: 7px; font-size: 14px; font-weight: 700; display: flex;
+      align-items: center; justify-content: center; cursor: pointer; color: #ccc;
+      font-family: inherit; -webkit-tap-highlight-color: transparent;
+      user-select: none; touch-action: manipulation; transition: transform .1s;
+    }
+    .toggle:active  { transform: scale(.87); }
+    .toggle.ok.on   { background: #f0fdf4; border-color: #16a34a; color: #16a34a; }
+    .toggle.ano.on  { background: #fef2f2; border-color: #dc2626; color: #dc2626; }
+    .toggle.na      { font-size: 9px; letter-spacing: -.3px; }
+    .toggle.na.on   { background: #f3f4f6; border-color: #6b7280; color: #6b7280; }
+    .toggle.unerr   { border-color: #fca5a5 !important; }
+
+    /* ── Anomalie note ── */
+    .anomalie-note {
+      display: none; background: #fff5f5; border-left: 3px solid #dc2626;
+      padding: 8px 14px 10px 36px; border-bottom: 1px solid #fecaca;
+    }
+    .anomalie-note.show { display: block; }
+    .anomalie-note label { font-size: 10px; font-weight: 700; color: #dc2626; text-transform: uppercase; letter-spacing: .5px; display: block; margin-bottom: 5px; }
+    .anomalie-note textarea {
+      width: 100%; font-family: inherit; font-size: 13px;
+      border: 1px solid #fca5a5; border-radius: 5px; padding: 7px 9px;
+      resize: none; min-height: 46px; color: #111; background: white;
+    }
+
+    /* ── Initiales ── */
+    .initiales-section { border-top: 2.5px solid #111; background: #f7f7f7; }
+    .initiales-row {
+      display: flex; align-items: center; padding: 12px 14px;
+      gap: 12px; border-bottom: 1px solid #e8e8e8;
+    }
+    .initiales-row:last-child { border-bottom: none; background: white; }
+    .initiales-label { flex: 1; font-size: 12px; color: #333; font-style: italic; line-height: 1.35; }
+    .initiales-input {
+      width: 68px; border: 1.5px solid #ccc; border-radius: 5px;
+      padding: 9px 6px; font-size: 16px; font-weight: 700; text-transform: uppercase;
+      text-align: center; font-family: inherit; letter-spacing: 3px; flex-shrink: 0;
+    }
+
+    /* ── Submit ── */
+    .submit-section { padding: 18px 14px 36px; background: #d6d6d6; }
+    .error-msg {
+      background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px;
+      padding: 11px 14px; color: #dc2626; font-size: 13px; margin-bottom: 12px; display: none;
+    }
+    .submit-btn {
+      width: 100%; padding: 15px; background: #111; color: white; border: none;
+      border-radius: 8px; font-size: 15px; font-weight: 700; font-family: inherit;
+      cursor: pointer; transition: background .15s;
+    }
+    .submit-btn:disabled { background: #666; cursor: not-allowed; }
+
+    /* ── Success screen ── */
+    #successScreen {
+      display: none; padding: 60px 24px; text-align: center;
+      flex-direction: column; align-items: center; gap: 1rem;
+    }
+    .success-icon {
+      width: 72px; height: 72px; background: #dcfce7; border: 3px solid #16a34a;
+      border-radius: 50%; display: flex; align-items: center; justify-content:center;
+      font-size: 34px; color: #16a34a; margin: 0 auto;
+    }
+    .success-title  { font-size: 22px; font-weight: 700; color: #111; }
+    .success-fname  { font-size: 12px; color: #888; font-family: monospace; background: #f3f3f3; padding: 6px 12px; border-radius: 4px; }
+    .status-row     { display: flex; align-items: center; gap: 10px; font-size: 14px; color: #333; }
+    .status-icon    { font-size: 18px; font-weight: 700; }
+    .new-btn        { margin-top: 12px; padding: 12px 24px; background: #111; color: white; border: none; border-radius: 7px; font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ── Loading ── -->
+  <div id="loadingScreen">
+    <div class="spinner"></div>
+    <p style="color:#888;font-size:14px;">Chargement de l'appareil…</p>
+  </div>
+
+  <!-- ── Error ── -->
+  <div id="errorScreen">
+    <div class="err-icon">⚠️</div>
+    <div class="err-title">Appareil introuvable</div>
+    <div class="err-msg" id="errMsg">Ce QR code est invalide ou l'appareil a été désactivé.</div>
+  </div>
+
+  <!-- ── Form ── -->
+  <div id="formWrap" style="display:none">
+
+    <div class="app-header">
+      <div class="header-top">
+        <div>
+          <h1>Fiche d'inspection quotidienne</h1>
+          <div class="sub">Chariots élévateurs</div>
+        </div>
+        <span class="vehicle-badge" id="vehicleBadge">—</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="progFill"></div></div>
+      <div class="progress-label"><span id="progCount">0</span> / 39 points</div>
+    </div>
+
+    <form id="inspForm" novalidate>
+
+      <!-- ── Info ── -->
+      <div class="info-section">
+        <div class="legende-bar">
+          <span class="leg-title">Légende :</span>
+          <span class="leg-ok">✓</span><span class="leg-txt">OK</span>
+          <span class="leg-sep">·</span>
+          <span class="leg-x">✗</span><span class="leg-txt">Anomalie</span>
+          <span class="leg-sep">·</span>
+          <span class="leg-na">N/A</span><span class="leg-txt">Non applicable</span>
+        </div>
+
+        <div class="field-row">
+          <div class="field"><label>N° du véhicule</label><input id="fVehicle" readonly></div>
+          <div class="field"><label>Semaine</label><input id="fWeek" readonly></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Date</label><input id="fDate" readonly></div>
+          <div class="field"><label>Heure</label><input id="fTime" readonly></div>
+        </div>
+        <div class="field-row solo">
+          <div class="field"><label>Utilisateur / Cariste *</label><input id="fUser" placeholder="Prénom Nom" autocomplete="name" required></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Compagnie</label><input id="fCompagnie" placeholder="Nom de l'entreprise"></div>
+          <div class="field"><label>Horomètre</label><input id="fHorometre" placeholder="heures" inputmode="numeric"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>N° de série</label><input id="fSerie" readonly></div>
+          <div class="field"><label>Marque</label><input id="fMarque" readonly></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Charge nominale</label><input id="fCharge" readonly></div>
+        </div>
+      </div>
+
+      <!-- ═══════ SECTION 1 ═══════ -->
+      <div class="section-header">État général du véhicule à l'arrêt</div>
+
+      <!-- 1 -->
+      <div class="item-row row-odd" data-id="i1"><span class="item-num">1</span><span class="item-label">Manuel de l'utilisateur</span><div class="toggles" id="t_i1"></div></div>
+      <div class="anomalie-note" data-note="i1"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+
+      <!-- 2 -->
+      <div class="item-row row-even" data-id="i2"><span class="item-num">2</span><span class="item-label">Pneus, roues (entailles, écrous desserrés, pression)</span><div class="toggles" id="t_i2"></div></div>
+      <div class="anomalie-note" data-note="i2"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+
+      <!-- 3 Fluides -->
+      <div class="item-row parent-row"><span class="item-num">3</span><span class="parent-label">Niveau des fluides :</span></div>
+      <div class="item-row sub-row row-odd" data-id="i3a"><span class="item-label">Huile pour les freins</span><div class="toggles" id="t_i3a"></div></div>
+      <div class="anomalie-note" data-note="i3a"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row sub-row row-even" data-id="i3b"><span class="item-label">Huile pour la transmission</span><div class="toggles" id="t_i3b"></div></div>
+      <div class="anomalie-note" data-note="i3b"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row sub-row row-odd" data-id="i3c"><span class="item-label">Huile hydraulique</span><div class="toggles" id="t_i3c"></div></div>
+      <div class="anomalie-note" data-note="i3c"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row sub-row row-even" data-id="i3d"><span class="item-label">Huile pour le moteur</span><div class="toggles" id="t_i3d"></div></div>
+      <div class="anomalie-note" data-note="i3d"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row sub-row row-odd" data-id="i3e"><span class="item-label">Liquide de refroidissement</span><div class="toggles" id="t_i3e"></div></div>
+      <div class="anomalie-note" data-note="i3e"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+
+      <!-- 4–18 -->
+      <div class="item-row row-even" data-id="i4"><span class="item-num">4</span><span class="item-label">Système hydraulique (boyau, fuites)</span><div class="toggles" id="t_i4"></div></div>
+      <div class="anomalie-note" data-note="i4"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-odd" data-id="i5"><span class="item-num">5</span><span class="item-label">Alimentation en carburant (diesel, électrique, essence, propane)</span><div class="toggles" id="t_i5"></div></div>
+      <div class="anomalie-note" data-note="i5"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-even" data-id="i6"><span class="item-num">6</span><span class="item-label">Bouteille de propane fixée solidement (si applicable)</span><div class="toggles" id="t_i6"></div></div>
+      <div class="anomalie-note" data-note="i6"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-odd" data-id="i7"><span class="item-num">7</span><span class="item-label">Batteries (bornes)</span><div class="toggles" id="t_i7"></div></div>
+      <div class="anomalie-note" data-note="i7"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-even" data-id="i8"><span class="item-num">8</span><span class="item-label">Courroies</span><div class="toggles" id="t_i8"></div></div>
+      <div class="anomalie-note" data-note="i8"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-odd" data-id="i9"><span class="item-num">9</span><span class="item-label">Soudures (fissures)</span><div class="toggles" id="t_i9"></div></div>
+      <div class="anomalie-note" data-note="i9"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-even" data-id="i10"><span class="item-num">10</span><span class="item-label">Fourches (bon état, même hauteur, alignement, appareillées, etc.)</span><div class="toggles" id="t_i10"></div></div>
+      <div class="anomalie-note" data-note="i10"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-odd" data-id="i11"><span class="item-num">11</span><span class="item-label">Dosseret de charge</span><div class="toggles" id="t_i11"></div></div>
+      <div class="anomalie-note" data-note="i11"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-even" data-id="i12"><span class="item-num">12</span><span class="item-label">Autocollants, avertissements et plaque signalétique</span><div class="toggles" id="t_i12"></div></div>
+      <div class="anomalie-note" data-note="i12"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-odd" data-id="i13"><span class="item-num">13</span><span class="item-label">Toit de protection</span><div class="toggles" id="t_i13"></div></div>
+      <div class="anomalie-note" data-note="i13"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-even" data-id="i14"><span class="item-num">14</span><span class="item-label">Moyens d'accès (marches, porte)</span><div class="toggles" id="t_i14"></div></div>
+      <div class="anomalie-note" data-note="i14"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-odd" data-id="i15"><span class="item-num">15</span><span class="item-label">Ceinture de sécurité</span><div class="toggles" id="t_i15"></div></div>
+      <div class="anomalie-note" data-note="i15"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-even" data-id="i16"><span class="item-num">16</span><span class="item-label">Extincteur (si applicable)</span><div class="toggles" id="t_i16"></div></div>
+      <div class="anomalie-note" data-note="i16"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-odd" data-id="i17"><span class="item-num">17</span><span class="item-label">Rapporteur d'angle</span><div class="toggles" id="t_i17"></div></div>
+      <div class="anomalie-note" data-note="i17"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-even" data-id="i18"><span class="item-num">18</span><span class="item-label">Charte de levage</span><div class="toggles" id="t_i18"></div></div>
+      <div class="anomalie-note" data-note="i18"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+
+      <!-- 19 Propreté -->
+      <div class="item-row parent-row"><span class="item-num">19</span><span class="parent-label">Propreté :</span></div>
+      <div class="item-row sub-row row-odd" data-id="i19a"><span class="item-label">De la cabine (plancher dégagé, vitres propres)</span><div class="toggles" id="t_i19a"></div></div>
+      <div class="anomalie-note" data-note="i19a"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row sub-row row-even" data-id="i19b"><span class="item-label">Des rétroviseurs</span><div class="toggles" id="t_i19b"></div></div>
+      <div class="anomalie-note" data-note="i19b"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+
+      <!-- ═══════ SECTION 2 ═══════ -->
+      <div class="section-header">État général du véhicule en marche</div>
+
+      <!-- 20 Freins -->
+      <div class="item-row parent-row"><span class="item-num">20</span><span class="parent-label">Freins :</span></div>
+      <div class="item-row sub-row row-odd" data-id="i20a"><span class="item-label">De service avant et arrière</span><div class="toggles" id="t_i20a"></div></div>
+      <div class="anomalie-note" data-note="i20a"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row sub-row row-even" data-id="i20b"><span class="item-label">De stationnement</span><div class="toggles" id="t_i20b"></div></div>
+      <div class="anomalie-note" data-note="i20b"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+
+      <!-- 21–32 -->
+      <div class="item-row row-odd" data-id="i21"><span class="item-num">21</span><span class="item-label">Système d'éclairage, feux de position</span><div class="toggles" id="t_i21"></div></div>
+      <div class="anomalie-note" data-note="i21"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-even" data-id="i22"><span class="item-num">22</span><span class="item-label">Témoins lumineux et instruments de lecture</span><div class="toggles" id="t_i22"></div></div>
+      <div class="anomalie-note" data-note="i22"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-odd" data-id="i23"><span class="item-num">23</span><span class="item-label">Klaxon, avertisseur sonore de marche arrière</span><div class="toggles" id="t_i23"></div></div>
+      <div class="anomalie-note" data-note="i23"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-even" data-id="i24"><span class="item-num">24</span><span class="item-label">Essuie-glaces</span><div class="toggles" id="t_i24"></div></div>
+      <div class="anomalie-note" data-note="i24"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-odd" data-id="i25"><span class="item-num">25</span><span class="item-label">Essai à vide de toutes les commandes</span><div class="toggles" id="t_i25"></div></div>
+      <div class="anomalie-note" data-note="i25"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-even" data-id="i26"><span class="item-num">26</span><span class="item-label">Stabilisateurs de mise à niveau (si applicable)</span><div class="toggles" id="t_i26"></div></div>
+      <div class="anomalie-note" data-note="i26"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-odd" data-id="i27"><span class="item-num">27</span><span class="item-label">Volant de direction (répond bien, moins de ¼ de tour de jeu)</span><div class="toggles" id="t_i27"></div></div>
+      <div class="anomalie-note" data-note="i27"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-even" data-id="i28"><span class="item-num">28</span><span class="item-label">Commandes hydrauliques répondent bien</span><div class="toggles" id="t_i28"></div></div>
+      <div class="anomalie-note" data-note="i28"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-odd" data-id="i29"><span class="item-num">29</span><span class="item-label">Systèmes d'élévation et d'inclinaison</span><div class="toggles" id="t_i29"></div></div>
+      <div class="anomalie-note" data-note="i29"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-even" data-id="i30"><span class="item-num">30</span><span class="item-label">Direction (tous les modes)</span><div class="toggles" id="t_i30"></div></div>
+      <div class="anomalie-note" data-note="i30"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-odd" data-id="i31"><span class="item-num">31</span><span class="item-label">Transmission, direction et gamme de vitesse</span><div class="toggles" id="t_i31"></div></div>
+      <div class="anomalie-note" data-note="i31"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+      <div class="item-row row-even" data-id="i32"><span class="item-num">32</span><span class="item-label">Tout autre élément spécifié par le fabricant</span><div class="toggles" id="t_i32"></div></div>
+      <div class="anomalie-note" data-note="i32"><label>Description de l'anomalie</label><textarea placeholder="Décrivez le problème…"></textarea></div>
+
+      <!-- ── Initiales ── -->
+      <div class="initiales-section">
+        <div class="initiales-row">
+          <span class="initiales-label">Initiales de l'utilisateur</span>
+          <input class="initiales-input" id="fInitUser" maxlength="4" placeholder="···" autocomplete="off">
+        </div>
+        <div class="initiales-row">
+          <span class="initiales-label">En cas de défectuosités, initiales du responsable de chantier</span>
+          <input class="initiales-input" id="fInitChef" maxlength="4" placeholder="···" autocomplete="off">
+        </div>
+      </div>
+
+      <!-- ── Submit ── -->
+      <div class="submit-section">
+        <div class="error-msg" id="errorMsg"></div>
+        <button type="submit" class="submit-btn" id="submitBtn">Soumettre l'inspection ✓</button>
+      </div>
+
+    </form>
+
+    <!-- ── Success ── -->
+    <div id="successScreen">
+      <div class="success-icon">✓</div>
+      <div class="success-title">Inspection enregistrée</div>
+      <div class="success-fname" id="successFilename">—</div>
+      <div class="status-row"><span class="status-icon" style="color:#16a34a">✓</span> PDF téléchargé</div>
+      <div class="status-row" id="emailStatusRow">
+        <span class="status-icon" id="emailIcon" style="color:#888">⟳</span>
+        <span id="emailLabel">Envoi de l'email…</span>
+      </div>
+      <button class="new-btn" id="newBtn" style="display:none" onclick="location.reload()">Nouvelle inspection</button>
+    </div>
+
+  </div><!-- /formWrap -->
+</div><!-- /wrap -->
+
+<script>
+// ── Constantes ────────────────────────────────────────────────
+const ALL_ITEMS = [
+  'i1','i2','i3a','i3b','i3c','i3d','i3e',
+  'i4','i5','i6','i7','i8','i9','i10','i11','i12','i13','i14','i15','i16','i17','i18',
+  'i19a','i19b','i20a','i20b',
+  'i21','i22','i23','i24','i25','i26','i27','i28','i29','i30','i31','i32'
+]
+
+const ITEM_LABELS = {
+  i1:'Manuel de l\'utilisateur', i2:'Pneus, roues',
+  i3a:'Fluides – Huile freins', i3b:'Fluides – Huile transmission',
+  i3c:'Fluides – Huile hydraulique', i3d:'Fluides – Huile moteur',
+  i3e:'Fluides – Liquide refroidissement',
+  i4:'Système hydraulique', i5:'Alimentation carburant',
+  i6:'Bouteille propane', i7:'Batteries', i8:'Courroies', i9:'Soudures',
+  i10:'Fourches', i11:'Dosseret de charge',
+  i12:'Autocollants et plaque signalétique',
+  i13:'Toit de protection', i14:'Moyens d\'accès',
+  i15:'Ceinture de sécurité', i16:'Extincteur',
+  i17:'Rapporteur d\'angle', i18:'Charte de levage',
+  i19a:'Propreté – Cabine', i19b:'Propreté – Rétroviseurs',
+  i20a:'Freins – Service avant et arrière', i20b:'Freins – Stationnement',
+  i21:'Système d\'éclairage', i22:'Témoins lumineux',
+  i23:'Klaxon / avertisseur', i24:'Essuie-glaces',
+  i25:'Essai à vide commandes', i26:'Stabilisateurs',
+  i27:'Volant de direction', i28:'Commandes hydrauliques',
+  i29:'Élévation et inclinaison', i30:'Direction',
+  i31:'Transmission et gamme de vitesse', i32:'Éléments fabricant'
+}
+
+// ── State ─────────────────────────────────────────────────────
+const answers = {}  // { itemId: 'ok'|'ano'|'na' }
+const notes   = {}  // { itemId: string }
+let   liftData = {} // données du lift depuis Supabase
+
+// ── Helpers ───────────────────────────────────────────────────
+const pad = n => String(n).padStart(2,'0')
+
+function getISOWeek(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7))
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7)
+}
+
+function formatDateFR(iso) {
+  const [y,m,d] = iso.split('-'); return `${d}/${m}/${y}`
+}
+
+// ── Date/Time ─────────────────────────────────────────────────
+const today   = new Date()
+const dateStr = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`
+const timeStr = `${pad(today.getHours())}:${pad(today.getMinutes())}`
+const weekNum = getISOWeek(today)
+
+// ── Init Supabase ─────────────────────────────────────────────
+const { createClient } = supabase
+const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+
+// ── Load lift from URL param ──────────────────────────────────
+async function init() {
+  const params = new URLSearchParams(window.location.search)
+  const liftId = params.get('lift')
+
+  if (!liftId) return showError('Aucun appareil spécifié dans l\'URL.')
+
+  const { data: lift, error } = await db
+    .from('lifts')
+    .select('*, organizations(name)')
+    .eq('id', liftId)
+    .eq('is_active', true)
+    .single()
+
+  if (error || !lift) return showError('Appareil introuvable ou désactivé.')
+
+  liftData = lift
+
+  // Pré-remplir les champs
+  document.getElementById('fVehicle').value   = lift.vehicle_id || ''
+  document.getElementById('fSerie').value     = lift.serial_number || ''
+  document.getElementById('fMarque').value    = lift.brand || ''
+  document.getElementById('fCharge').value    = lift.nominal_load || ''
+  document.getElementById('fCompagnie').value = lift.organizations?.name || ''
+  document.getElementById('fWeek').value      = `N° ${weekNum}`
+  document.getElementById('fDate').value      = formatDateFR(dateStr)
+  document.getElementById('fTime').value      = timeStr
+  document.getElementById('vehicleBadge').textContent = lift.vehicle_id
+
+  showForm()
+}
+
+function showError(msg) {
+  document.getElementById('loadingScreen').style.display = 'none'
+  document.getElementById('errMsg').textContent = msg
+  document.getElementById('errorScreen').style.display = 'flex'
+}
+
+function showForm() {
+  document.getElementById('loadingScreen').style.display = 'none'
+  document.getElementById('formWrap').style.display = 'block'
+  buildToggles()
+}
+
+// ── Build toggles ─────────────────────────────────────────────
+function buildToggles() {
+  ALL_ITEMS.forEach(id => {
+    const container = document.getElementById(`t_${id}`)
+    if (!container) return
+
+    ;['ok','ano','na'].forEach(val => {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = `toggle ${val}`
+      btn.textContent = val === 'ok' ? '✓' : val === 'ano' ? '✗' : 'N/A'
+      btn.addEventListener('click', () => handleToggle(id, val, btn))
+      container.appendChild(btn)
+    })
+  })
+}
+
+function handleToggle(itemId, val, btn) {
+  // Deselect siblings
+  const container = document.getElementById(`t_${itemId}`)
+  container.querySelectorAll('.toggle').forEach(b => b.classList.remove('on'))
+  btn.classList.add('on')
+  answers[itemId] = val
+
+  // Row highlight
+  const row = document.querySelector(`[data-id="${itemId}"]`)
+  if (row) {
+    row.classList.toggle('has-anomalie', val === 'ano')
+    row.classList.remove('unanswered')
+  }
+
+  // Anomalie note
+  const note = document.querySelector(`.anomalie-note[data-note="${itemId}"]`)
+  if (note) {
+    note.classList.toggle('show', val === 'ano')
+    if (val !== 'ano') {
+      const ta = note.querySelector('textarea')
+      if (ta) { ta.value = ''; notes[itemId] = '' }
+    }
+  }
+
+  // Remove error state from toggle buttons
+  container.querySelectorAll('.toggle').forEach(b => b.classList.remove('unerr'))
+
+  updateProgress()
+}
+
+// Capture anomalie notes
+document.querySelectorAll('.anomalie-note textarea').forEach(ta => {
+  ta.addEventListener('input', () => {
+    const note = ta.closest('.anomalie-note')
+    notes[note.dataset.note] = ta.value.trim()
+  })
+})
+
+// ── Progress ──────────────────────────────────────────────────
+function updateProgress() {
+  const done = ALL_ITEMS.filter(id => answers[id]).length
+  document.getElementById('progFill').style.width  = (done / ALL_ITEMS.length * 100) + '%'
+  document.getElementById('progCount').textContent = done
+}
+
+// ── Validation ────────────────────────────────────────────────
+function validate() {
+  const errors = []
+  const user = document.getElementById('fUser').value.trim()
+  if (!user) { document.getElementById('fUser').classList.add('error'); errors.push('user') }
+  else document.getElementById('fUser').classList.remove('error')
+
+  const unanswered = ALL_ITEMS.filter(id => !answers[id])
+  unanswered.forEach(id => {
+    const container = document.getElementById(`t_${id}`)
+    if (container) container.querySelectorAll('.toggle').forEach(b => b.classList.add('unerr'))
+    const row = document.querySelector(`[data-id="${id}"]`)
+    if (row) row.classList.add('unanswered')
+  })
+
+  if (unanswered.length > 0) {
+    errors.push(...unanswered)
+    const firstRow = document.querySelector(`[data-id="${unanswered[0]}"]`)
+    if (firstRow) firstRow.scrollIntoView({ behavior:'smooth', block:'center' })
+  }
+  return errors
+}
+
+// ── Submit ────────────────────────────────────────────────────
+document.getElementById('inspForm').addEventListener('submit', async e => {
+  e.preventDefault()
+  const errEl  = document.getElementById('errorMsg')
+  const errors = validate()
+
+  if (errors.length > 0) {
+    errEl.style.display = 'block'
+    errEl.textContent = errors.includes('user')
+      ? 'Veuillez saisir le nom de l\'utilisateur / cariste.'
+      : `${errors.filter(k => k !== 'user').length} point(s) non renseigné(s). Veuillez compléter tous les éléments.`
+    return
+  }
+
+  errEl.style.display = 'none'
+  const btn = document.getElementById('submitBtn')
+  btn.disabled = true
+  btn.textContent = 'Génération du PDF…'
+
+  const user = document.getElementById('fUser').value.trim()
+  const [fname, ...lparts] = user.split(' ')
+  const lname    = lparts.join('-') || 'Nom'
+  const filename = `${liftData.vehicle_id}_${fname}-${lname}_${dateStr}`
+
+  // Generate & download PDF
+  const pdfBase64 = generatePDF(filename, user)
+
+  // Show success screen
+  document.getElementById('inspForm').style.display = 'none'
+  document.getElementById('successScreen').style.display = 'flex'
+  document.getElementById('successFilename').textContent = filename + '.pdf'
+  window.scrollTo({ top:0, behavior:'smooth' })
+
+  // Save to Supabase + send email
+  btn.textContent = 'Envoi…'
+  try {
+    await saveInspection(filename, user, pdfBase64)
+    document.getElementById('emailIcon').textContent  = '✓'
+    document.getElementById('emailIcon').style.color  = '#16a34a'
+    document.getElementById('emailLabel').textContent = 'Email envoyé avec succès'
+  } catch(err) {
+    console.error(err)
+    document.getElementById('emailIcon').textContent  = '✗'
+    document.getElementById('emailIcon').style.color  = '#dc2626'
+    document.getElementById('emailLabel').textContent = 'Erreur d\'envoi email'
+  } finally {
+    document.getElementById('newBtn').style.display = 'block'
+  }
+})
+
+// ── Save to Supabase ──────────────────────────────────────────
+async function saveInspection(filename, utilisateur, pdfBase64) {
+  // 1. Create inspection record
+  const { data: insp, error: inspErr } = await db
+    .from('inspections')
+    .insert({
+      lift_id:           liftData.id,
+      organization_id:   liftData.organization_id,
+      date:              dateStr,
+      time_str:          timeStr,
+      week_num:          weekNum,
+      horometre:         document.getElementById('fHorometre').value || null,
+      compagnie:         document.getElementById('fCompagnie').value || null,
+      no_serie_snapshot: liftData.serial_number || null,
+      marque_snapshot:   liftData.brand         || null,
+      charge_nominale:   liftData.nominal_load  || null,
+      initiales_user:    document.getElementById('fInitUser').value.toUpperCase() || null,
+      initiales_chef:    document.getElementById('fInitChef').value.toUpperCase() || null,
+    })
+    .select()
+    .single()
+
+  if (inspErr) throw new Error(inspErr.message)
+
+  // 2. Insert inspection items
+  const items = ALL_ITEMS.map(key => ({
+    inspection_id: insp.id,
+    item_key:      key,
+    result:        answers[key],
+    note:          notes[key] || null,
+  }))
+
+  const { error: itemsErr } = await db.from('inspection_items').insert(items)
+  if (itemsErr) throw new Error(itemsErr.message)
+
+  // 3. Call Edge Function to send email
+  const anomalies = ALL_ITEMS
+    .filter(id => answers[id] === 'ano')
+    .map(id => `• ${ITEM_LABELS[id] || id}${notes[id] ? ' – ' + notes[id] : ''}`)
+
+  const resp = await fetch(EDGE_FUNCTION_URL, {
+    method:  'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+    },
+    body: JSON.stringify({
+      inspection_id:   insp.id,
+      filename:        filename + '.pdf',
+      fileBase64:      pdfBase64,
+      vehicle_id:      liftData.vehicle_id,
+      utilisateur,
+      compagnie:       document.getElementById('fCompagnie').value || '—',
+      no_serie:        liftData.serial_number || '—',
+      marque:          liftData.brand         || '—',
+      date:            formatDateFR(dateStr),
+      heure:           timeStr,
+      semaine:         String(weekNum),
+      anomalies_count: String(anomalies.length),
+      anomalies_list:  anomalies.length > 0 ? anomalies.join('\n') : 'Aucune anomalie détectée',
+    }),
+  })
+
+  if (!resp.ok) throw new Error('Edge Function error: ' + resp.status)
+}
+
+// ── PDF Generation (fidèle au document original) ─────────────
+function generatePDF(filename, utilisateur) {
+  const { jsPDF } = window.jspdf
+  const doc = new jsPDF({ orientation:'portrait', unit:'mm', format:'letter' })
+  const W=215.9,H=279.4,ML=8,MR=8,CW=W-ML-MR
+  const BLACK=[0,0,0],WHITE=[255,255,255],LGREY=[236,236,236],DGREY=[90,90,90]
+
+  function tick(cx,cy){const s=1.7;doc.line(cx-s*.38,cy+s*.06,cx-s*.05,cy+s*.42);doc.line(cx-s*.05,cy+s*.42,cx+s*.42,cy-s*.30)}
+  function cross(cx,cy){const s=1.5;doc.line(cx-s,cy-s,cx+s,cy+s);doc.line(cx+s,cy-s,cx-s,cy+s)}
+  function sym(val,cx,cy){
+    if(val==='ok'){doc.setDrawColor(22,163,74);doc.setLineWidth(0.62);tick(cx,cy)}
+    else if(val==='ano'){doc.setDrawColor(220,38,38);doc.setLineWidth(0.62);cross(cx,cy)}
+    else if(val==='na'){doc.setFont('helvetica','bold');doc.setFontSize(5.5);doc.setTextColor(100,100,100);doc.text('N/A',cx,cy+1.0,{align:'center'})}
+    doc.setDrawColor(...BLACK);doc.setLineWidth(0.16);doc.setTextColor(...BLACK)
+  }
+
+  let y=ML
+  doc.setFont('helvetica','bold');doc.setFontSize(7.8);doc.setTextColor(...BLACK)
+  doc.text("Fiche d\u2019inspection quotidienne des chariots \u00e9l\u00e9vateurs",W-MR,y+3.5,{align:'right'})
+  y+=5
+
+  const BH=26,f1W=20,swW=50,legW=CW-f1W-swW,legCW=legW/3,swX=ML+f1W,legX=swX+swW
+  doc.setDrawColor(...BLACK);doc.setLineWidth(0.35)
+  doc.setFillColor(...LGREY);doc.rect(ML,y,f1W,BH,'FD')
+  doc.setFont('helvetica','bold');doc.setFontSize(6.8);doc.setTextColor(...BLACK)
+  doc.text('FEUILLE 1',ML+f1W/2,y+BH/2+1.5,{align:'center'})
+  doc.rect(swX,y,swW,BH/2,'D');doc.rect(swX,y+BH/2,swW,BH/2,'D')
+  doc.setFont('helvetica','normal');doc.setFontSize(6.3)
+  doc.text('Semaine N\u00b0 '+weekNum,swX+2,y+BH/4+1.1)
+  doc.text('Date : '+formatDateFR(dateStr)+' \u2013 '+timeStr,swX+2,y+BH*3/4+1.1)
+  const ly2=y+BH/2
+  doc.setFillColor(...LGREY);doc.rect(legX,y,legW,BH/2,'FD')
+  doc.setFont('helvetica','bold');doc.setFontSize(6.8)
+  doc.text('L\u00e9gende',legX+legW/2,y+BH/4+1.1,{align:'center'})
+  for(let i=0;i<3;i++)doc.rect(legX+i*legCW,ly2,legCW,BH/2,'D')
+  doc.setFontSize(6.3)
+  doc.text('OK',legX+legCW*.5,ly2+2.1,{align:'center'})
+  doc.text('Anomalies',legX+legCW*1.5,ly2+2.1,{align:'center'})
+  doc.text('Non applicable',legX+legCW*2.5,ly2+2.1,{align:'center'})
+  const symLY=ly2+5.0,stk=3.6,scr=3.0
+  doc.setDrawColor(22,163,74);doc.setLineWidth(1.0)
+  doc.line(legX+legCW*.5-stk*.38,symLY+stk*.06,legX+legCW*.5-stk*.05,symLY+stk*.42)
+  doc.line(legX+legCW*.5-stk*.05,symLY+stk*.42,legX+legCW*.5+stk*.42,symLY-stk*.30)
+  doc.setDrawColor(220,38,38);doc.setLineWidth(1.0)
+  doc.line(legX+legCW*1.5-scr,symLY-scr,legX+legCW*1.5+scr,symLY+scr)
+  doc.line(legX+legCW*1.5+scr,symLY-scr,legX+legCW*1.5-scr,symLY+scr)
+  doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(80,80,80)
+  doc.text('N/A',legX+legCW*2.5,symLY+1.3,{align:'center'})
+  doc.setDrawColor(...BLACK);doc.setLineWidth(0.4);doc.setTextColor(...BLACK);doc.rect(ML,y,CW,BH)
+  y+=BH+1
+
+  const IR=5.6;doc.setDrawColor(...BLACK);doc.setLineWidth(0.22)
+  const c3=CW/3
+  function infoRow(cells){
+    let x=ML
+    cells.forEach(c=>{
+      doc.rect(x,y,c.w,IR,'D')
+      doc.setFont('helvetica','bold');doc.setFontSize(6.3);doc.setTextColor(...BLACK)
+      doc.text(c.label,x+1.5,y+IR/2+1.1)
+      const lw=doc.getTextWidth(c.label)
+      doc.setFont('helvetica','normal');doc.text(c.val||'',x+lw+2.5,y+IR/2+1.1)
+      x+=c.w
+    })
+    y+=IR
+  }
+  const horo=document.getElementById('fHorometre').value
+  infoRow([
+    {label:"N\u00b0 du v\u00e9hicule :",  val:liftData.vehicle_id||'',    w:c3},
+    {label:"Charge nominale :",           val:liftData.nominal_load||'',  w:c3},
+    {label:"Horom\u00e8tre :",            val:horo?horo+' h':'',          w:c3},
+  ])
+  const u1=CW*.56,compagnie=document.getElementById('fCompagnie').value
+  infoRow([{label:"Utilisateur / cariste :",val:utilisateur,w:u1},{label:"Compagnie :",val:compagnie,w:CW-u1}])
+  infoRow([{label:"N\u00b0 de s\u00e9rie du chariot \u00e9l\u00e9vateur :",val:liftData.serial_number||'',w:u1},{label:"Marque :",val:liftData.brand||'',w:CW-u1}])
+  y+=1.5
+
+  const numW=6.5,resW=13.5,labW=CW-numW-resW,rowH=4.5,secH=5.5,subIn=4,resX=ML+numW+labW
+  let rowIdx=0
+
+  function secHdr(txt){
+    doc.setFillColor(79,140,13);doc.rect(ML,y,CW,secH,'F')
+    doc.setFont('helvetica','bold');doc.setFontSize(7.2);doc.setTextColor(0,0,0)
+    doc.text(txt,ML+CW/2,y+secH-1.4,{align:'center'})
+    doc.setTextColor(...BLACK);y+=secH;rowIdx=0
+  }
+
+  function pRow(num,label,key,isSub=false){
+    const bg=rowIdx%2===0?WHITE:LGREY;rowIdx++
+    doc.setFillColor(...bg);doc.rect(ML,y,CW,rowH,'FD')
+    doc.setDrawColor(175,175,175);doc.setLineWidth(0.08)
+    doc.line(ML+numW,y,ML+numW,y+rowH);doc.line(resX,y,resX,y+rowH)
+    doc.setDrawColor(...BLACK);doc.setLineWidth(0.16);doc.rect(ML,y,CW,rowH)
+    if(num){doc.setFont('helvetica','normal');doc.setFontSize(5.3);doc.setTextColor(145,145,145);doc.text(String(num),ML+numW-1,y+rowH-1.2,{align:'right'})}
+    const lx=ML+numW+(isSub?subIn:1.6)
+    doc.setFont('helvetica','normal');doc.setFontSize(6.6);doc.setTextColor(...BLACK)
+    doc.text(doc.splitTextToSize(label,labW-(isSub?subIn:1.6)-1)[0],lx,y+rowH/2+1.05)
+    if(key){sym(answers[key]||'',resX+resW/2,y+rowH/2);doc.setDrawColor(...BLACK);doc.setLineWidth(0.16)}
+    y+=rowH
+  }
+
+  function pGroup(num,label,subs){
+    const n=subs.length,tH=n*rowH,pCW=48,sx=ML+pCW
+    for(let i=0;i<n;i++){const bg=rowIdx%2===0?WHITE:LGREY;rowIdx++;doc.setFillColor(...bg);doc.rect(sx,y+i*rowH,CW-pCW,rowH,'F')}
+    doc.setFillColor(244,244,244);doc.rect(ML,y,pCW,tH,'F')
+    for(let i=0;i<n;i++){
+      doc.setFont('helvetica','normal');doc.setFontSize(6.5);doc.setTextColor(...BLACK)
+      doc.text(subs[i].label,sx+2,y+i*rowH+rowH/2+1.05)
+      sym(answers[subs[i].key]||'',resX+resW/2,y+i*rowH+rowH/2)
+      doc.setDrawColor(...BLACK);doc.setLineWidth(0.16)
+    }
+    doc.setFont('helvetica','normal');doc.setFontSize(5.3);doc.setTextColor(145,145,145)
+    doc.text(String(num),ML+numW-1,y+2.3,{align:'right'})
+    doc.setFont('helvetica','bold');doc.setFontSize(6.8);doc.setTextColor(...BLACK)
+    doc.text(label,ML+numW+1.5,y+tH/2+1.1)
+    doc.setDrawColor(175,175,175);doc.setLineWidth(0.08)
+    doc.line(ML+numW,y,ML+numW,y+tH);doc.line(ML+pCW,y,ML+pCW,y+tH);doc.line(resX,y,resX,y+tH)
+    for(let i=1;i<n;i++)doc.line(sx,y+i*rowH,ML+CW,y+i*rowH)
+    doc.setDrawColor(...BLACK);doc.setLineWidth(0.16);doc.rect(ML,y,CW,tH)
+    y+=tH
+  }
+
+  secHdr("\u00c9tat g\u00e9n\u00e9ral du v\u00e9hicule \u00e0 l\u2019arr\u00eat")
+  pRow(1,"Manuel de l\u2019utilisateur",'i1')
+  pRow(2,"Pneus, roues (entailles, \u00e9crous desserr\u00e9s, pression)",'i2')
+  pGroup(3,"Niveau des fluides :",[
+    {label:"Huile pour les freins",key:'i3a'},{label:"Huile pour la transmission",key:'i3b'},
+    {label:"Huile hydraulique",key:'i3c'},{label:"Huile pour le moteur",key:'i3d'},
+    {label:"Liquide de refroidissement",key:'i3e'}
+  ])
+  pRow(4,"Syst\u00e8me hydraulique (boyau, fuites)",'i4')
+  pRow(5,"Alimentation en carburant (diesel, \u00e9lectrique, essence, propane)",'i5')
+  pRow(6,"Bouteille de propane fix\u00e9e solidement (si applicable)",'i6')
+  pRow(7,"Batteries (bornes)",'i7')
+  pRow(8,"Courroies",'i8')
+  pRow(9,"Soudures (fissures)",'i9')
+  pRow(10,"Fourches (bon \u00e9tat, m\u00eame hauteur, alignement, appareil\u00e9es, etc.)",'i10')
+  pRow(11,"Dosseret de charge",'i11')
+  pRow(12,"Autocollants, avertissements et plaque signal\u00e9tique",'i12')
+  pRow(13,"Toit de protection",'i13')
+  pRow(14,"Moyens d\u2019acc\u00e8s (marches, porte)",'i14')
+  pRow(15,"Ceinture de s\u00e9curit\u00e9",'i15')
+  pRow(16,"Extincteur (si applicable)",'i16')
+  pRow(17,"Rapporteur d\u2019angle",'i17')
+  pRow(18,"Charte de levage",'i18')
+  pGroup(19,"Propret\u00e9 :",[
+    {label:"De la cabine (plancher d\u00e9gag\u00e9, vitres propres)",key:'i19a'},
+    {label:"Des r\u00e9troviseurs",key:'i19b'}
+  ])
+
+  secHdr("\u00c9tat g\u00e9n\u00e9ral du v\u00e9hicule en marche")
+  pGroup(20,"Freins :",[
+    {label:"De service avant et arri\u00e8re",key:'i20a'},
+    {label:"De stationnement",key:'i20b'}
+  ])
+  pRow(21,"Syst\u00e8me d\u2019\u00e9clairage, feux de position",'i21')
+  pRow(22,"T\u00e9moins lumineux et instruments de lecture",'i22')
+  pRow(23,"Klaxon, avertisseur sonore de marche arri\u00e8re",'i23')
+  pRow(24,"Essuie-glaces",'i24')
+  pRow(25,"Essai \u00e0 vide de toutes les commandes",'i25')
+  pRow(26,"Stabilisateurs de mise \u00e0 niveau (si applicable)",'i26')
+  pRow(27,"Volant de direction (r\u00e9pond bien, moins de \u00bc de tour de jeu)",'i27')
+  pRow(28,"Commandes hydrauliques r\u00e9pondent bien",'i28')
+  pRow(29,"Syst\u00e8mes d\u2019\u00e9l\u00e9vation et d\u2019inclinaison",'i29')
+  pRow(30,"Direction (tous les modes)",'i30')
+  pRow(31,"Transmission, direction et gamme de vitesse",'i31')
+  pRow(32,"Tout autre \u00e9l\u00e9ment sp\u00e9cifi\u00e9 par le fabricant",'i32')
+
+  const initLabW=CW-20,initH=5.2
+  function initRow(txt,val,grey){
+    doc.setFillColor(...(grey?LGREY:WHITE));doc.rect(ML,y,CW,initH,'FD')
+    doc.setDrawColor(...BLACK);doc.setLineWidth(0.22);doc.rect(ML,y,CW,initH)
+    doc.line(ML+initLabW,y,ML+initLabW,y+initH)
+    doc.setFont('helvetica','italic');doc.setFontSize(6.3);doc.setTextColor(...BLACK)
+    doc.text(txt,ML+1.8,y+initH/2+1.1)
+    doc.setFont('helvetica','bold');doc.setFontSize(8.5)
+    doc.text(val||'',ML+initLabW+10,y+initH/2+1.3,{align:'center'})
+    y+=initH
+  }
+  const initUser=document.getElementById('fInitUser').value.toUpperCase()
+  const initChef=document.getElementById('fInitChef').value.toUpperCase()
+  initRow("Initiales de l\u2019utilisateur",initUser,true)
+  initRow("En cas de d\u00e9fectuosit\u00e9s, initiales du responsable de chantier",initChef,false)
+
+  doc.setFont('helvetica','italic');doc.setFontSize(6.3);doc.setTextColor(...DGREY)
+  doc.text("Originale \u2013 Faire une copie pour conserver dans les dossiers de l\u2019entreprise",W/2,H-ML+1,{align:'center'})
+
+  // Page 2
+  const anomalies=ALL_ITEMS.filter(id=>answers[id]==='ano')
+  doc.addPage();let y2=ML
+  doc.setFont('helvetica','bold');doc.setFontSize(11);doc.setTextColor(...BLACK)
+  doc.text("Fiche d\u2019inspection quotidienne",W/2,y2+6,{align:'center'})
+  doc.text("des chariots \u00e9l\u00e9vateurs",W/2,y2+12,{align:'center'})
+  y2+=17
+  doc.setFont('helvetica','bold');doc.setFontSize(8);doc.text('FEUILLE 2',ML,y2+4);y2+=7
+  doc.setFillColor(...LGREY);doc.rect(ML,y2,CW,8,'FD')
+  doc.setDrawColor(...BLACK);doc.setLineWidth(0.3);doc.rect(ML,y2,CW,8)
+  doc.setFont('helvetica','bold');doc.setFontSize(8);doc.setTextColor(...BLACK)
+  doc.text("N\u00b0 DE S\u00c9RIE DU CHARIOT \u00c9L\u00c9VATEUR : "+(liftData.serial_number||''),ML+3,y2+5.5);y2+=8
+  const cD=22,cU=40,cCorr=22,cP=CW-cD-cU-cCorr,xU=ML+cD,xP=xU+cU,xC=xP+cP,tHH=12
+  doc.setFillColor(...LGREY);doc.rect(ML,y2,CW,tHH,'FD')
+  doc.setDrawColor(...BLACK);doc.setLineWidth(0.25);doc.rect(ML,y2,CW,tHH)
+  doc.line(xU,y2,xU,y2+tHH);doc.line(xP,y2,xP,y2+tHH);doc.line(xC,y2,xC,y2+tHH)
+  doc.line(xC,y2+tHH/2,xC+cCorr,y2+tHH/2);doc.line(xC+cCorr/2,y2+tHH/2,xC+cCorr/2,y2+tHH)
+  doc.setFont('helvetica','bold');doc.setFontSize(7.5);doc.setTextColor(...BLACK)
+  doc.text('DATE',ML+cD/2,y2+tHH/2+1.2,{align:'center'})
+  doc.text('UTILISATEUR / CARISTE',xU+cU/2,y2+tHH/2+1.2,{align:'center'})
+  doc.text('PROBL\u00c8ME RELEV\u00c9',xP+cP/2,y2+tHH/2+1.2,{align:'center'})
+  doc.text('CORRIG\u00c9',xC+cCorr/2,y2+tHH/4+1.2,{align:'center'})
+  doc.text('OUI',xC+cCorr/4,y2+tHH*3/4+1.5,{align:'center'})
+  doc.text('NON',xC+cCorr*3/4,y2+tHH*3/4+1.5,{align:'center'});y2+=tHH
+  const aH=9,minR=20,totR=Math.max(anomalies.length,minR)
+  for(let i=0;i<totR;i++){
+    const bg2=i%2===0?WHITE:LGREY;doc.setFillColor(...bg2);doc.rect(ML,y2,CW,aH,'FD')
+    doc.setDrawColor(...BLACK);doc.setLineWidth(0.2);doc.rect(ML,y2,CW,aH)
+    doc.setDrawColor(160,160,160);doc.setLineWidth(0.08)
+    doc.line(xU,y2,xU,y2+aH);doc.line(xP,y2,xP,y2+aH);doc.line(xC,y2,xC,y2+aH);doc.line(xC+cCorr/2,y2,xC+cCorr/2,y2+aH)
+    if(anomalies[i]){
+      const id=anomalies[i]
+      doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(...BLACK)
+      doc.text(formatDateFR(dateStr),ML+2,y2+aH/2+1.2)
+      doc.text(utilisateur,xU+2,y2+aH/2+1.2)
+      const lbl=ITEM_LABELS[id]||id
+      const note=notes[id]?' \u2013 '+notes[id]:''
+      doc.text(doc.splitTextToSize(lbl+note,cP-3)[0],xP+2,y2+aH/2+1.2)
+    }
+    y2+=aH
+  }
+  doc.setFont('helvetica','italic');doc.setFontSize(6.3);doc.setTextColor(...DGREY)
+  doc.text("Originale \u2013 Faire une copie pour conserver dans les dossiers de l\u2019entreprise",W/2,H-ML+1,{align:'center'})
+
+  const b64=doc.output('datauristring').split(',')[1]
+  doc.save(filename+'.pdf')
+  return b64
+}
+
+// ── Start ─────────────────────────────────────────────────────
+init()
+</script>
+</body>
+</html>
